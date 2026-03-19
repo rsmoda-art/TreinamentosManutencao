@@ -32,7 +32,6 @@ if 'modules' not in st.session_state:
         {"id": "m3", "title": "Espaço Confinado", "freq": 12}
     ]
 
-# Dicionário de Requisitos: Cargo -> Lista de IDs de Módulos Obrigatórios
 if 'requirements' not in st.session_state:
     st.session_state.requirements = {
         "Operador": ["m1", "m2"],
@@ -53,9 +52,13 @@ def calculate_status(expiry_date_str, is_required):
     try:
         today = datetime.now().date()
         expiry = datetime.strptime(expiry_date_str, '%Y-%m-%d').date()
-        if expiry < today: return "❌ Expirado"
+        
+        # Prefixo diferente para indicar se é um opcional que o cara fez
+        prefix = "✅" if is_required else "🔵"
+        
+        if expiry < today: return "❌ Vencido"
         if expiry < today + timedelta(days=30): return "⚠️ A Vencer"
-        return "✅ Conforme"
+        return f"{prefix} Conforme"
     except:
         return "Erro Data"
 
@@ -70,7 +73,7 @@ if page == "Dashboard":
     col1, col2, col3, col4 = st.columns(4)
     
     total_emp = len(st.session_state.employees)
-    expired = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate'), True) == "❌ Expirado")
+    expired = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate'), True) == "❌ Vencido")
     warning = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate'), True) == "⚠️ A Vencer")
     
     col1.metric("Total Colaboradores", total_emp)
@@ -93,17 +96,18 @@ if page == "Dashboard":
             for mod_id in reqs:
                 rec = next((r for r in st.session_state.records if r['empId'] == emp['id'] and r['modId'] == mod_id), None)
                 status = calculate_status(rec['expiryDate'] if rec else None, True)
-                if status in ["🔴 OBRIGATÓRIO", "❌ Expirado", "⚠️ A Vencer"]:
-                    mod_name = next(m['title'] for m in st.session_state.modules if m['id'] == mod_id)
-                    alerts.append({"Quem": emp['name'], "O quê": mod_name, "Status": status})
+                if status in ["🔴 OBRIGATÓRIO", "❌ Vencido", "⚠️ A Vencer"]:
+                    mod_name = next((m['title'] for m in st.session_state.modules if m['id'] == mod_id), "N/A")
+                    alerts.append({"Quem": emp['name'], "Treinamento": mod_name, "Status": status})
         if alerts:
             st.dataframe(pd.DataFrame(alerts), use_container_width=True, hide_index=True)
         else:
-            st.success("Tudo em dia!")
+            st.success("Toda a equipe está em dia!")
 
 # --- PÁGINA: MATRIZ DE TREINAMENTO ---
 elif page == "Matriz de Treinamento":
     st.title("📋 Matriz de Qualificação")
+    
     matrix_list = []
     for emp in st.session_state.employees:
         row = {"Colaborador": emp['name'], "Cargo": emp['role']}
@@ -114,67 +118,89 @@ elif page == "Matriz de Treinamento":
             row[mod['title']] = calculate_status(rec['expiryDate'] if rec else None, is_req)
         matrix_list.append(row)
     
-    st.dataframe(pd.DataFrame(matrix_list).set_index("Colaborador"), use_container_width=True)
-    st.caption("Legenda: ✅ Conforme | ⚠️ A Vencer | ❌ Expirado | 🔴 OBRIGATÓRIO (Falta fazer) | ⚪ N/A (Não exigido)")
+    df_matrix = pd.DataFrame(matrix_list)
+    st.dataframe(df_matrix.set_index("Colaborador"), use_container_width=True)
+    
+    # Botão de Download
+    csv = df_matrix.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Baixar Matriz (Excel/CSV)", csv, "matriz_treinamento.csv", "text/csv")
+    
+    st.caption("Legenda: ✅/🔵 Conforme | ⚠️ A Vencer | ❌ Vencido | 🔴 OBRIGATÓRIO | ⚪ N/A")
 
 # --- PÁGINA: LANÇAR TREINAMENTO ---
 elif page == "Lançar Treinamento":
     st.title("📝 Registrar Conclusão")
     with st.form("log_training"):
-        emp_name = st.selectbox("Funcionário", [e['name'] for e in st.session_state.employees])
-        mod_title = st.selectbox("Treinamento", [m['title'] for m in st.session_state.modules])
+        emp_name = st.selectbox("Selecione o Funcionário", [e['name'] for e in st.session_state.employees])
+        mod_title = st.selectbox("Selecione o Treinamento", [m['title'] for m in st.session_state.modules])
         comp_date = st.date_input("Data de Realização", datetime.now())
+        
         if st.form_submit_button("Salvar Registro"):
             emp_id = next(e['id'] for e in st.session_state.employees if e['name'] == emp_name)
             mod_obj = next(m for m in st.session_state.modules if m['title'] == mod_title)
+            
+            # Cálculo automático baseado na frequência do módulo
             expiry_date = comp_date + timedelta(days=30 * mod_obj['freq'])
+            
+            # Atualiza registro existente ou cria novo
             st.session_state.records = [r for r in st.session_state.records if not (r['empId'] == emp_id and r['modId'] == mod_obj['id'])]
             st.session_state.records.append({
                 "empId": emp_id, "modId": mod_obj['id'],
                 "completionDate": comp_date.strftime('%Y-%m-%d'),
                 "expiryDate": expiry_date.strftime('%Y-%m-%d')
             })
-            st.success("Registro atualizado!")
+            st.success(f"Treinamento de {mod_title} registrado!")
             st.balloons()
 
 # --- PÁGINA: CONFIGURAR REQUISITOS ---
 elif page == "Configurar Requisitos":
     st.title("⚙️ Requisitos por Cargo")
     roles = sorted(list(set(e['role'] for e in st.session_state.employees)))
+    valid_ids = [m['id'] for m in st.session_state.modules]
+    
     for role in roles:
-        with st.expander(f"Treinamentos Obrigatórios para: {role}"):
+        with st.expander(f"Treinamentos Obrigatórios: {role}"):
             current = st.session_state.requirements.get(role, [])
-            new_reqs = st.multiselect("Selecione os módulos:", 
-                options=[m['id'] for m in st.session_state.modules],
-                default=current,
-                format_func=lambda x: next(m['title'] for m in st.session_state.modules if m['id'] == x),
-                key=f"req_{role}")
+            # Limpeza de segurança: remove IDs que não existem mais
+            safe_default = [r for r in current if r in valid_ids]
+            
+            new_reqs = st.multiselect(
+                "Selecione os módulos obrigatórios:", 
+                options=valid_ids,
+                default=safe_default,
+                format_func=lambda x: next((m['title'] for m in st.session_state.modules if m['id'] == x), "N/A"),
+                key=f"req_{role}"
+            )
             st.session_state.requirements[role] = new_reqs
-            st.info(f"Salvo para {role}")
+            st.info(f"Configuração para {role} atualizada.")
 
 # --- PÁGINA: GERENCIAR MÓDULOS ---
 elif page == "Gerenciar Módulos":
     st.title("📚 Módulos e Periodicidade")
     with st.expander("➕ Adicionar Novo Treinamento"):
         with st.form("new_mod"):
-            t = st.text_input("Título do Treinamento (Ex: NR35)")
-            f = st.number_input("Periodicidade (Meses)", min_value=1, value=12)
-            if st.form_submit_button("Cadastrar Módulo"):
+            t = st.text_input("Nome do Treinamento")
+            f = st.number_input("Validade (Meses)", min_value=1, value=12)
+            if st.form_submit_button("Cadastrar"):
                 new_id = f"m{len(st.session_state.modules) + 1}"
                 st.session_state.modules.append({"id": new_id, "title": t, "freq": f})
                 st.rerun()
-    st.table(pd.DataFrame(st.session_state.modules)[['title', 'freq']])
+    
+    if st.session_state.modules:
+        st.table(pd.DataFrame(st.session_state.modules)[['title', 'freq']])
 
 # --- PÁGINA: FUNCIONÁRIOS ---
 elif page == "Funcionários":
-    st.title("👥 Funcionários")
+    st.title("👥 Gestão de Colaboradores")
     with st.expander("➕ Novo Colaborador"):
         with st.form("new_emp"):
-            n = st.text_input("Nome")
+            n = st.text_input("Nome Completo")
             r = st.text_input("Cargo")
-            d = st.selectbox("Depto", ["Operações", "Manutenção", "RH"])
-            if st.form_submit_button("Cadastrar"):
+            d = st.selectbox("Departamento", ["Operações", "Manutenção", "Segurança", "RH", "Laboratório"])
+            if st.form_submit_button("Salvar"):
                 new_id = str(len(st.session_state.employees) + 1)
                 st.session_state.employees.append({"id": new_id, "name": n, "role": r, "dept": d})
                 st.rerun()
-    st.dataframe(pd.DataFrame(st.session_state.employees).drop(columns=['id']), use_container_width=True)
+    
+    if st.session_state.employees:
+        st.dataframe(pd.DataFrame(st.session_state.employees).drop(columns=['id']), use_container_width=True)
