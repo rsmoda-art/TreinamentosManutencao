@@ -9,158 +9,172 @@ st.set_page_config(page_title="Gestão de Treinamentos - Raízen", layout="wide"
 # --- ESTILO CUSTOMIZADO ---
 st.markdown("""
     <style>
-    .main {
-        background-color: #f5f5f0;
-    }
+    .main { background-color: #f5f5f0; }
     div[data-testid="stMetric"] {
-        background-color: white;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
-        border: 1px solid #e0e0e0;
+        background-color: white; padding: 15px; border-radius: 10px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.05); border: 1px solid #e0e0e0;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- INICIALIZAÇÃO DE DADOS (Persistência na Sessão) ---
+# --- INICIALIZAÇÃO DE DADOS ---
 if 'employees' not in st.session_state:
     st.session_state.employees = [
-        {"id": "1", "name": "João Silva", "role": "Operador", "dept": "Operações", "status": "active"},
-        {"id": "2", "name": "Maria Santos", "role": "Técnica", "dept": "Manutenção", "status": "active"}
+        {"id": "1", "name": "João Silva", "role": "Operador", "dept": "Operações"},
+        {"id": "2", "name": "Maria Santos", "role": "Técnica", "dept": "Manutenção"},
+        {"id": "3", "name": "Renan Silva Moda", "role": "Supervisor", "dept": "Manutenção"}
     ]
 
 if 'modules' not in st.session_state:
     st.session_state.modules = [
         {"id": "m1", "title": "Segurança NR10", "freq": 12},
         {"id": "m2", "title": "Trabalho em Altura", "freq": 24},
-        {"id": "m3", "title": "Espaço Confinado NR33", "freq": 12}
+        {"id": "m3", "title": "Espaço Confinado", "freq": 12}
     ]
 
+# Dicionário de Requisitos: Cargo -> Lista de IDs de Módulos Obrigatórios
+if 'requirements' not in st.session_state:
+    st.session_state.requirements = {
+        "Operador": ["m1", "m2"],
+        "Técnica": ["m1", "m2", "m3"],
+        "Supervisor": ["m1", "m3"]
+    }
+
 if 'records' not in st.session_state:
-    # Exemplo inicial de treinamento vencido para teste
     st.session_state.records = [
         {"empId": "1", "modId": "m1", "completionDate": "2023-01-01", "expiryDate": "2024-01-01"}
     ]
 
 # --- FUNÇÕES AUXILIARES ---
-def calculate_status(expiry_date_str):
-    if not expiry_date_str: return "Pendente"
+def calculate_status(expiry_date_str, is_required):
+    if not expiry_date_str:
+        return "🔴 OBRIGATÓRIO" if is_required else "⚪ N/A"
+    
     try:
         today = datetime.now().date()
         expiry = datetime.strptime(expiry_date_str, '%Y-%m-%d').date()
-        if expiry < today: return "Expirado"
-        if expiry < today + timedelta(days=30): return "A Vencer"
-        return "Conforme"
+        if expiry < today: return "❌ Expirado"
+        if expiry < today + timedelta(days=30): return "⚠️ A Vencer"
+        return "✅ Conforme"
     except:
-        return "Erro na Data"
+        return "Erro Data"
 
 # --- SIDEBAR ---
-st.sidebar.title("🛠️ Manutenção")
-st.sidebar.subheader("Matrix Pro System")
-page = st.sidebar.radio("Navegação:", ["Dashboard", "Funcionários", "Matriz de Treinamento", "Lançar Treinamento"])
+st.sidebar.title("🛠️ Gestão Matrix")
+page = st.sidebar.radio("Navegação:", 
+    ["Dashboard", "Matriz de Treinamento", "Lançar Treinamento", "Configurar Requisitos", "Gerenciar Módulos", "Funcionários"])
 
 # --- PÁGINA: DASHBOARD ---
 if page == "Dashboard":
     st.title("📊 Painel de Controle")
-    
     col1, col2, col3, col4 = st.columns(4)
     
     total_emp = len(st.session_state.employees)
-    expired_count = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate')) == "Expirado")
-    warning_count = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate')) == "A Vencer")
+    expired = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate'), True) == "❌ Expirado")
+    warning = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate'), True) == "⚠️ A Vencer")
     
     col1.metric("Total Colaboradores", total_emp)
-    col2.metric("Treinamentos Realizados", len(st.session_state.records))
-    col3.metric("A Vencer (30 dias)", warning_count)
-    col4.metric("Expirados", expired_count, delta_color="inverse")
+    col2.metric("Treinamentos Registrados", len(st.session_state.records))
+    col3.metric("A Vencer", warning)
+    col4.metric("Expirados", expired, delta_color="inverse")
 
     st.divider()
-    
     c1, c2 = st.columns([1, 1])
     with c1:
         st.subheader("Distribuição por Departamento")
         df_emp = pd.DataFrame(st.session_state.employees)
         fig = px.pie(df_emp, names='dept', hole=0.4, color_discrete_sequence=px.colors.qualitative.Safe)
         st.plotly_chart(fig, use_container_width=True)
-        
     with c2:
-        st.subheader("⚠️ Lista Detalhada de Alertas")
-        alert_data = []
-        for rec in st.session_state.records:
-            status = calculate_status(rec.get('expiryDate'))
-            if status in ["Expirado", "A Vencer"]:
-                emp = next((e for e in st.session_state.employees if e['id'] == rec['empId']), None)
-                mod = next((m for m in st.session_state.modules if m['id'] == rec['modId']), None)
-                if emp and mod:
-                    alert_data.append({"Colaborador": emp['name'], "Treinamento": mod['title'], "Status": status})
-        
-        if alert_data:
-            st.dataframe(pd.DataFrame(alert_data), use_container_width=True, hide_index=True)
+        st.subheader("⚠️ Alertas de Obrigatoriedade")
+        alerts = []
+        for emp in st.session_state.employees:
+            reqs = st.session_state.requirements.get(emp['role'], [])
+            for mod_id in reqs:
+                rec = next((r for r in st.session_state.records if r['empId'] == emp['id'] and r['modId'] == mod_id), None)
+                status = calculate_status(rec['expiryDate'] if rec else None, True)
+                if status in ["🔴 OBRIGATÓRIO", "❌ Expirado", "⚠️ A Vencer"]:
+                    mod_name = next(m['title'] for m in st.session_state.modules if m['id'] == mod_id)
+                    alerts.append({"Quem": emp['name'], "O quê": mod_name, "Status": status})
+        if alerts:
+            st.dataframe(pd.DataFrame(alerts), use_container_width=True, hide_index=True)
         else:
-            st.success("Nenhum alerta crítico no momento!")
+            st.success("Tudo em dia!")
 
-# --- PÁGINA: FUNCIONÁRIOS ---
-elif page == "Funcionários":
-    st.title("👥 Gestão de Funcionários")
-    
-    with st.expander("➕ Cadastrar Novo Funcionário"):
-        with st.form("new_employee"):
-            c1, c2 = st.columns(2)
-            name = c1.text_input("Nome Completo")
-            role = c2.text_input("Cargo")
-            dept = st.selectbox("Departamento", ["Operações", "Manutenção", "Segurança", "RH", "Laboratório"])
-            if st.form_submit_button("Confirmar Cadastro"):
-                if name and role:
-                    new_id = str(len(st.session_state.employees) + 1)
-                    st.session_state.employees.append({"id": new_id, "name": name, "role": role, "dept": dept, "status": "active"})
-                    st.success(f"{name} adicionado com sucesso!")
-                    st.rerun()
-
-    st.subheader("Lista de Colaboradores")
-    df_display = pd.DataFrame(st.session_state.employees).drop(columns=['id'])
-    st.dataframe(df_display, use_container_width=True)
-
-# --- PÁGINA: MATRIZ ---
+# --- PÁGINA: MATRIZ DE TREINAMENTO ---
 elif page == "Matriz de Treinamento":
     st.title("📋 Matriz de Qualificação")
-    
     matrix_list = []
     for emp in st.session_state.employees:
-        row = {"Funcionário": emp['name'], "Depto": emp['dept']}
+        row = {"Colaborador": emp['name'], "Cargo": emp['role']}
+        emp_reqs = st.session_state.requirements.get(emp['role'], [])
         for mod in st.session_state.modules:
-            # Pega o registro mais recente para este par funcionário/módulo
+            is_req = mod['id'] in emp_reqs
             rec = next((r for r in st.session_state.records if r['empId'] == emp['id'] and r['modId'] == mod['id']), None)
-            row[mod['title']] = calculate_status(rec['expiryDate']) if rec else "Não Realizado"
+            row[mod['title']] = calculate_status(rec['expiryDate'] if rec else None, is_req)
         matrix_list.append(row)
     
-    st.dataframe(pd.DataFrame(matrix_list).set_index("Funcionário"), use_container_width=True)
-    st.caption("Legenda: Conforme (Válido) | A Vencer (Próximo 30 dias) | Expirado (Vencido)")
+    st.dataframe(pd.DataFrame(matrix_list).set_index("Colaborador"), use_container_width=True)
+    st.caption("Legenda: ✅ Conforme | ⚠️ A Vencer | ❌ Expirado | 🔴 OBRIGATÓRIO (Falta fazer) | ⚪ N/A (Não exigido)")
 
 # --- PÁGINA: LANÇAR TREINAMENTO ---
 elif page == "Lançar Treinamento":
     st.title("📝 Registrar Conclusão")
-    st.info("Utilize este formulário para atualizar a data de realização de um treinamento.")
-    
     with st.form("log_training"):
-        emp_name = st.selectbox("Selecione o Funcionário", [e['name'] for e in st.session_state.employees])
-        mod_title = st.selectbox("Selecione o Treinamento", [m['title'] for m in st.session_state.modules])
+        emp_name = st.selectbox("Funcionário", [e['name'] for e in st.session_state.employees])
+        mod_title = st.selectbox("Treinamento", [m['title'] for m in st.session_state.modules])
         comp_date = st.date_input("Data de Realização", datetime.now())
-        
         if st.form_submit_button("Salvar Registro"):
-            # Encontrar IDs
             emp_id = next(e['id'] for e in st.session_state.employees if e['name'] == emp_name)
             mod_obj = next(m for m in st.session_state.modules if m['title'] == mod_title)
-            
-            # Calcular validade
             expiry_date = comp_date + timedelta(days=30 * mod_obj['freq'])
-            
-            # Remover registro antigo se existir e adicionar novo
             st.session_state.records = [r for r in st.session_state.records if not (r['empId'] == emp_id and r['modId'] == mod_obj['id'])]
             st.session_state.records.append({
-                "empId": emp_id,
-                "modId": mod_obj['id'],
+                "empId": emp_id, "modId": mod_obj['id'],
                 "completionDate": comp_date.strftime('%Y-%m-%d'),
                 "expiryDate": expiry_date.strftime('%Y-%m-%d')
             })
-            st.success(f"Treinamento de {mod_title} registrado para {emp_name}!")
+            st.success("Registro atualizado!")
             st.balloons()
+
+# --- PÁGINA: CONFIGURAR REQUISITOS ---
+elif page == "Configurar Requisitos":
+    st.title("⚙️ Requisitos por Cargo")
+    roles = sorted(list(set(e['role'] for e in st.session_state.employees)))
+    for role in roles:
+        with st.expander(f"Treinamentos Obrigatórios para: {role}"):
+            current = st.session_state.requirements.get(role, [])
+            new_reqs = st.multiselect("Selecione os módulos:", 
+                options=[m['id'] for m in st.session_state.modules],
+                default=current,
+                format_func=lambda x: next(m['title'] for m in st.session_state.modules if m['id'] == x),
+                key=f"req_{role}")
+            st.session_state.requirements[role] = new_reqs
+            st.info(f"Salvo para {role}")
+
+# --- PÁGINA: GERENCIAR MÓDULOS ---
+elif page == "Gerenciar Módulos":
+    st.title("📚 Módulos e Periodicidade")
+    with st.expander("➕ Adicionar Novo Treinamento"):
+        with st.form("new_mod"):
+            t = st.text_input("Título do Treinamento (Ex: NR35)")
+            f = st.number_input("Periodicidade (Meses)", min_value=1, value=12)
+            if st.form_submit_button("Cadastrar Módulo"):
+                new_id = f"m{len(st.session_state.modules) + 1}"
+                st.session_state.modules.append({"id": new_id, "title": t, "freq": f})
+                st.rerun()
+    st.table(pd.DataFrame(st.session_state.modules)[['title', 'freq']])
+
+# --- PÁGINA: FUNCIONÁRIOS ---
+elif page == "Funcionários":
+    st.title("👥 Funcionários")
+    with st.expander("➕ Novo Colaborador"):
+        with st.form("new_emp"):
+            n = st.text_input("Nome")
+            r = st.text_input("Cargo")
+            d = st.selectbox("Depto", ["Operações", "Manutenção", "RH"])
+            if st.form_submit_button("Cadastrar"):
+                new_id = str(len(st.session_state.employees) + 1)
+                st.session_state.employees.append({"id": new_id, "name": n, "role": r, "dept": d})
+                st.rerun()
+    st.dataframe(pd.DataFrame(st.session_state.employees).drop(columns=['id']), use_container_width=True)
