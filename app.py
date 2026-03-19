@@ -20,9 +20,9 @@ st.markdown("""
         border: 1px solid #e0e0e0;
     }
     </style>
-    """, unsafe_allow_html=True) # CORREÇÃO: unsafe_allow_html=True
+    """, unsafe_allow_html=True)
 
-# --- MOCK DATA (Persistência básica na sessão) ---
+# --- INICIALIZAÇÃO DE DADOS (Persistência na Sessão) ---
 if 'employees' not in st.session_state:
     st.session_state.employees = [
         {"id": "1", "name": "João Silva", "role": "Operador", "dept": "Operações", "status": "active"},
@@ -32,13 +32,14 @@ if 'employees' not in st.session_state:
 if 'modules' not in st.session_state:
     st.session_state.modules = [
         {"id": "m1", "title": "Segurança NR10", "freq": 12},
-        {"id": "m2", "title": "Trabalho em Altura", "freq": 24}
+        {"id": "m2", "title": "Trabalho em Altura", "freq": 24},
+        {"id": "m3", "title": "Espaço Confinado NR33", "freq": 12}
     ]
 
 if 'records' not in st.session_state:
-    # Adicionando um record de exemplo para teste do Dashboard
+    # Exemplo inicial de treinamento vencido para teste
     st.session_state.records = [
-        {"empId": "1", "modId": "m1", "completionDate": "2023-10-01", "expiryDate": "2024-10-01"}
+        {"empId": "1", "modId": "m1", "completionDate": "2023-01-01", "expiryDate": "2024-01-01"}
     ]
 
 # --- FUNÇÕES AUXILIARES ---
@@ -54,10 +55,9 @@ def calculate_status(expiry_date_str):
         return "Erro na Data"
 
 # --- SIDEBAR ---
-# Usei um placeholder de imagem mais estável
 st.sidebar.title("🛠️ Manutenção")
 st.sidebar.subheader("Matrix Pro System")
-page = st.sidebar.radio("Navegação:", ["Dashboard", "Funcionários", "Matriz de Treinamento", "Agenda"])
+page = st.sidebar.radio("Navegação:", ["Dashboard", "Funcionários", "Matriz de Treinamento", "Lançar Treinamento"])
 
 # --- PÁGINA: DASHBOARD ---
 if page == "Dashboard":
@@ -66,14 +66,13 @@ if page == "Dashboard":
     col1, col2, col3, col4 = st.columns(4)
     
     total_emp = len(st.session_state.employees)
-    # Correção na lógica de contagem para evitar erros com campos vazios
-    expired = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate')) == "Expirado")
-    warning = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate')) == "A Vencer")
+    expired_count = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate')) == "Expirado")
+    warning_count = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate')) == "A Vencer")
     
     col1.metric("Total Colaboradores", total_emp)
     col2.metric("Treinamentos Realizados", len(st.session_state.records))
-    col3.metric("A Vencer (30 dias)", warning)
-    col4.metric("Expirados", expired, delta_color="inverse")
+    col3.metric("A Vencer (30 dias)", warning_count)
+    col4.metric("Expirados", expired_count, delta_color="inverse")
 
     st.divider()
     
@@ -83,12 +82,22 @@ if page == "Dashboard":
         df_emp = pd.DataFrame(st.session_state.employees)
         fig = px.pie(df_emp, names='dept', hole=0.4, color_discrete_sequence=px.colors.qualitative.Safe)
         st.plotly_chart(fig, use_container_width=True)
+        
     with c2:
-        st.subheader("Avisos Rápidos")
-        if expired > 0:
-            st.error(f"Atenção: Existem {expired} treinamentos vencidos!")
+        st.subheader("⚠️ Lista Detalhada de Alertas")
+        alert_data = []
+        for rec in st.session_state.records:
+            status = calculate_status(rec.get('expiryDate'))
+            if status in ["Expirado", "A Vencer"]:
+                emp = next((e for e in st.session_state.employees if e['id'] == rec['empId']), None)
+                mod = next((m for m in st.session_state.modules if m['id'] == rec['modId']), None)
+                if emp and mod:
+                    alert_data.append({"Colaborador": emp['name'], "Treinamento": mod['title'], "Status": status})
+        
+        if alert_data:
+            st.dataframe(pd.DataFrame(alert_data), use_container_width=True, hide_index=True)
         else:
-            st.success("Tudo em dia com a equipe!")
+            st.success("Nenhum alerta crítico no momento!")
 
 # --- PÁGINA: FUNCIONÁRIOS ---
 elif page == "Funcionários":
@@ -106,8 +115,6 @@ elif page == "Funcionários":
                     st.session_state.employees.append({"id": new_id, "name": name, "role": role, "dept": dept, "status": "active"})
                     st.success(f"{name} adicionado com sucesso!")
                     st.rerun()
-                else:
-                    st.warning("Preencha o nome e o cargo.")
 
     st.subheader("Lista de Colaboradores")
     df_display = pd.DataFrame(st.session_state.employees).drop(columns=['id'])
@@ -115,25 +122,45 @@ elif page == "Funcionários":
 
 # --- PÁGINA: MATRIZ ---
 elif page == "Matriz de Treinamento":
-    st.title("📋 Matriz de Qualificação (Status)")
+    st.title("📋 Matriz de Qualificação")
     
     matrix_list = []
     for emp in st.session_state.employees:
         row = {"Funcionário": emp['name'], "Depto": emp['dept']}
         for mod in st.session_state.modules:
-            # Busca o registro mais recente desse funcionário para esse módulo
+            # Pega o registro mais recente para este par funcionário/módulo
             rec = next((r for r in st.session_state.records if r['empId'] == emp['id'] and r['modId'] == mod['id']), None)
             row[mod['title']] = calculate_status(rec['expiryDate']) if rec else "Não Realizado"
         matrix_list.append(row)
     
-    df_matrix = pd.DataFrame(matrix_list)
-    st.dataframe(df_matrix.set_index("Funcionário"), use_container_width=True)
-    
+    st.dataframe(pd.DataFrame(matrix_list).set_index("Funcionário"), use_container_width=True)
     st.caption("Legenda: Conforme (Válido) | A Vencer (Próximo 30 dias) | Expirado (Vencido)")
 
-# --- PÁGINA: AGENDA ---
-elif page == "Agenda":
-    st.title("📅 Cronograma")
-    st.info("Aqui você poderá agendar as próximas turmas de treinamento.")
-    d = st.date_input("Consultar Data", datetime.now())
-    st.write(f"Verificando disponibilidade para: {d.strftime('%d/%m/%Y')}")
+# --- PÁGINA: LANÇAR TREINAMENTO ---
+elif page == "Lançar Treinamento":
+    st.title("📝 Registrar Conclusão")
+    st.info("Utilize este formulário para atualizar a data de realização de um treinamento.")
+    
+    with st.form("log_training"):
+        emp_name = st.selectbox("Selecione o Funcionário", [e['name'] for e in st.session_state.employees])
+        mod_title = st.selectbox("Selecione o Treinamento", [m['title'] for m in st.session_state.modules])
+        comp_date = st.date_input("Data de Realização", datetime.now())
+        
+        if st.form_submit_button("Salvar Registro"):
+            # Encontrar IDs
+            emp_id = next(e['id'] for e in st.session_state.employees if e['name'] == emp_name)
+            mod_obj = next(m for m in st.session_state.modules if m['title'] == mod_title)
+            
+            # Calcular validade
+            expiry_date = comp_date + timedelta(days=30 * mod_obj['freq'])
+            
+            # Remover registro antigo se existir e adicionar novo
+            st.session_state.records = [r for r in st.session_state.records if not (r['empId'] == emp_id and r['modId'] == mod_obj['id'])]
+            st.session_state.records.append({
+                "empId": emp_id,
+                "modId": mod_obj['id'],
+                "completionDate": comp_date.strftime('%Y-%m-%d'),
+                "expiryDate": expiry_date.strftime('%Y-%m-%d')
+            })
+            st.success(f"Treinamento de {mod_title} registrado para {emp_name}!")
+            st.balloons()
