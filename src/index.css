@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-headline: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-primary: #002c98;
+  --color-primary-container: #1a43bf;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #b2bfff;
+  
+  --color-surface: #f7f9ff;
+  --color-surface-container-low: #f1f4fa;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-high: #e5e8ee;
+  
+  --color-on-surface: #181c20;
+  --color-on-surface-variant: #444654;
+  
+  --color-tertiary-fixed: #8df7c1;
+  --color-on-tertiary-fixed: #002113;
+  
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+  
+  --color-outline-variant: #c4c5d6;
+}
+
+@layer base {
+  body {
+    @apply bg-surface text-on-surface font-sans antialiased;
+  }
+}
+
+.signature-gradient {
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-container) 100%);
+}
+
+.glass-header {
+  background: rgba(247, 249, 255, 0.8);
+  backdrop-filter: blur(12px);
+}
+
+/* Custom scrollbar for the "Ledger" feel */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-outline-variant);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-on-surface-variant);
+}

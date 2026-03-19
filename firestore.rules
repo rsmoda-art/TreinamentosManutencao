@@ -1,0 +1,139 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: employees
+    // Document ID: employeeId
+    // Fields:
+    //   - name: string (required)
+    //   - role: string (required)
+    //   - department: string (required)
+    //   - hireDate: string (optional, ISO 8601)
+    //   - status: string (required, 'active' | 'inactive')
+    //   - email: string (optional, email format)
+    //   - functionalRestriction: string (optional)
+    //
+    // Collection: modules
+    // Document ID: moduleId
+    // Fields:
+    //   - title: string (required)
+    //   - description: string (optional)
+    //   - category: string (required)
+    //   - frequency: string (required, 'one-time' | 'annual' | 'biennial')
+    //
+    // Collection: records
+    // Document ID: recordId
+    // Fields:
+    //   - employeeId: string (required)
+    //   - moduleId: string (required)
+    //   - completionDate: string (optional, ISO 8601)
+    //   - expiryDate: string (optional, ISO 8601)
+    //   - status: string (required, 'completed' | 'pending' | 'expired')
+    //   - isMandatory: boolean (optional)
+    //
+    // Collection: sessions
+    // Document ID: sessionId
+    // Fields:
+    //   - moduleId: string (required)
+    //   - date: string (required, ISO 8601)
+    //   - time: string (optional)
+    //   - location: string (optional)
+    //   - instructor: string (optional)
+    //   - attendees: list (optional, strings)
+    //   - status: string (required, 'scheduled' | 'concluded')
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "rsmoda@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmployee(data) {
+      return hasRequiredFields(['name', 'role', 'department', 'status']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.role is string && data.role.size() > 0 && data.role.size() < 100 &&
+             data.department is string && data.department.size() > 0 && data.department.size() < 100 &&
+             data.status in ['active', 'inactive'];
+    }
+
+    function isValidModule(data) {
+      return hasRequiredFields(['title', 'category', 'frequency']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.category is string && data.category.size() > 0 && data.category.size() < 100 &&
+             data.frequency in ['one-time', 'annual', 'biennial'];
+    }
+
+    function isValidRecord(data) {
+      return hasRequiredFields(['employeeId', 'moduleId', 'status']) &&
+             data.employeeId is string && data.employeeId.size() > 0 &&
+             data.moduleId is string && data.moduleId.size() > 0 &&
+             data.status in ['completed', 'pending', 'expired'];
+    }
+
+    function isValidSession(data) {
+      return hasRequiredFields(['moduleId', 'date', 'status']) &&
+             data.moduleId is string && data.moduleId.size() > 0 &&
+             data.date is string && data.date.size() > 0 &&
+             data.status in ['scheduled', 'concluded'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /employees/{employeeId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidEmployee(request.resource.data);
+      allow update: if isAuthenticated() && isValidEmployee(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /modules/{moduleId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidModule(request.resource.data);
+      allow update: if isAuthenticated() && isValidModule(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /records/{recordId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidRecord(request.resource.data);
+      allow update: if isAuthenticated() && isValidRecord(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /sessions/{sessionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidSession(request.resource.data);
+      allow update: if isAuthenticated() && isValidSession(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create, update: if isAdmin();
+    }
+  }
+}

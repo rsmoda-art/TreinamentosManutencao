@@ -1,0 +1,78 @@
+{
+  "entities": {
+    "Employee": {
+      "title": "Employee",
+      "description": "A person working in the organization.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Full name of the employee" },
+        "role": { "type": "string", "description": "Job title or role" },
+        "department": { "type": "string", "description": "Department the employee belongs to" },
+        "hireDate": { "type": "string", "format": "date", "description": "Date the employee was hired" },
+        "status": { "type": "string", "enum": ["active", "inactive"], "description": "Employment status" },
+        "email": { "type": "string", "format": "email", "description": "Work email address" },
+        "functionalRestriction": { "type": "string", "description": "Functional restriction message if any training is expired" }
+      },
+      "required": ["name", "role", "department", "status"]
+    },
+    "TrainingModule": {
+      "title": "Training Module",
+      "description": "A specific training course or skill module.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Title of the training module" },
+        "description": { "type": "string", "description": "Brief description of the training" },
+        "category": { "type": "string", "description": "Category (e.g., Safety, Technical, Compliance)" },
+        "frequency": { "type": "string", "enum": ["one-time", "annual", "biennial"], "description": "How often the training must be repeated" }
+      },
+      "required": ["title", "category", "frequency"]
+    },
+    "TrainingRecord": {
+      "title": "Training Record",
+      "description": "A record of an employee completing a training module.",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string", "description": "Reference to the Employee ID" },
+        "moduleId": { "type": "string", "description": "Reference to the Training Module ID" },
+        "completionDate": { "type": "string", "format": "date", "description": "Date the training was completed" },
+        "expiryDate": { "type": "string", "format": "date", "description": "Date the training record expires" },
+        "status": { "type": "string", "enum": ["completed", "pending", "expired"], "description": "Current status of the training record" },
+        "isMandatory": { "type": "boolean", "description": "Whether this training is mandatory for this employee" }
+      },
+      "required": ["employeeId", "moduleId", "status"]
+    },
+    "TrainingSession": {
+      "title": "Training Session",
+      "description": "A scheduled training event.",
+      "type": "object",
+      "properties": {
+        "moduleId": { "type": "string", "description": "Reference to the Training Module ID" },
+        "date": { "type": "string", "format": "date", "description": "Date of the session" },
+        "time": { "type": "string", "description": "Time of the session" },
+        "location": { "type": "string", "description": "Where the training takes place" },
+        "instructor": { "type": "string", "description": "Who is teaching the session" },
+        "attendees": { "type": "array", "items": { "type": "string" }, "description": "List of employee IDs attending" },
+        "status": { "type": "string", "enum": ["scheduled", "concluded"], "description": "Current status of the session" }
+      },
+      "required": ["moduleId", "date", "status"]
+    }
+  },
+  "firestore": {
+    "/employees/{employeeId}": {
+      "schema": "Employee",
+      "description": "Collection of employee profiles."
+    },
+    "/modules/{moduleId}": {
+      "schema": "TrainingModule",
+      "description": "Collection of available training modules."
+    },
+    "/records/{recordId}": {
+      "schema": "TrainingRecord",
+      "description": "Collection of training completion records."
+    },
+    "/sessions/{sessionId}": {
+      "schema": "TrainingSession",
+      "description": "Collection of scheduled training sessions."
+    }
+  }
+}
