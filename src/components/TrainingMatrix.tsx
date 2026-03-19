@@ -8,7 +8,7 @@ import { collection, onSnapshot, addDoc, updateDoc, doc, query, where, setDoc, s
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { CheckCircle2, Clock, AlertCircle, Plus, Search, Filter, ChevronRight, Settings2, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { format, addMonths, isAfter } from 'date-fns';
+import { format, addMonths, isBefore, parseISO, addDays } from 'date-fns';
 
 interface Employee {
   id: string;
@@ -111,10 +111,23 @@ export default function TrainingMatrix() {
     if (!module) return;
 
     let expiryDate = '';
+    const completionDate = new Date(recordForm.completionDate);
+    
     if (module.frequency === 'annual') {
-      expiryDate = format(addMonths(new Date(recordForm.completionDate), 12), 'yyyy-MM-dd');
+      expiryDate = format(addMonths(completionDate, 12), 'yyyy-MM-dd');
     } else if (module.frequency === 'biennial') {
-      expiryDate = format(addMonths(new Date(recordForm.completionDate), 24), 'yyyy-MM-dd');
+      expiryDate = format(addMonths(completionDate, 24), 'yyyy-MM-dd');
+    } else if (module.frequency === 'monthly') {
+      expiryDate = format(addMonths(completionDate, 1), 'yyyy-MM-dd');
+    } else if (module.frequency === 'quarterly') {
+      expiryDate = format(addMonths(completionDate, 3), 'yyyy-MM-dd');
+    } else if (module.frequency === 'semiannual') {
+      expiryDate = format(addMonths(completionDate, 6), 'yyyy-MM-dd');
+    }
+
+    let finalStatus = recordForm.status;
+    if (expiryDate && isBefore(parseISO(expiryDate), new Date())) {
+      finalStatus = 'expired';
     }
 
     const recordId = `${selectedCell.empId}_${selectedCell.modId}`;
@@ -125,6 +138,7 @@ export default function TrainingMatrix() {
         employeeId: selectedCell.empId,
         moduleId: selectedCell.modId,
         ...recordForm,
+        status: finalStatus,
         expiryDate,
         updatedAt: serverTimestamp(),
       }, { merge: true });
@@ -256,17 +270,32 @@ export default function TrainingMatrix() {
                               setIsRecordModalOpen(true);
                             }}
                           >
-                            {record && record.completionDate ? (
-                              <div className={`p-2 rounded-xl transition-all transform group-hover/cell:scale-110 ${
-                                record.status === 'completed' ? 'bg-emerald-50 text-emerald-600' :
-                                record.status === 'pending' ? 'bg-amber-50 text-amber-600' :
-                                'bg-rose-50 text-rose-600'
-                              }`}>
-                                {record.status === 'completed' ? <CheckCircle2 className="w-6 h-6" /> :
-                                 record.status === 'pending' ? <Clock className="w-6 h-6" /> :
-                                 <AlertCircle className="w-6 h-6" />}
-                              </div>
-                            ) : (
+                            {record && record.completionDate ? (() => {
+                              const today = new Date();
+                              const next30Days = addDays(today, 30);
+                              const expiryDate = record.expiryDate ? parseISO(record.expiryDate) : null;
+                              
+                              let computedStatus = record.status;
+                              if (expiryDate) {
+                                if (isBefore(expiryDate, today)) {
+                                  computedStatus = 'expired';
+                                } else if (isBefore(expiryDate, next30Days)) {
+                                  computedStatus = 'pending';
+                                }
+                              }
+
+                              return (
+                                <div className={`p-2 rounded-xl transition-all transform group-hover/cell:scale-110 ${
+                                  computedStatus === 'completed' ? 'bg-emerald-50 text-emerald-600' :
+                                  computedStatus === 'pending' ? 'bg-amber-50 text-amber-600' :
+                                  'bg-rose-50 text-rose-600'
+                                }`}>
+                                  {computedStatus === 'completed' ? <CheckCircle2 className="w-6 h-6" /> :
+                                   computedStatus === 'pending' ? <Clock className="w-6 h-6" /> :
+                                   <AlertCircle className="w-6 h-6" />}
+                                </div>
+                              );
+                            })() : (
                               <div className={`p-2 rounded-xl transition-all ${isMandatory ? 'bg-amber-50 text-amber-500' : 'bg-stone-50 text-stone-200 opacity-0 group-hover/cell:opacity-100'}`}>
                                 <Plus className="w-6 h-6" />
                               </div>
@@ -312,6 +341,9 @@ export default function TrainingMatrix() {
                     <label className="text-xs font-bold text-stone-400 uppercase tracking-widest">Frequência</label>
                     <select value={moduleForm.frequency} onChange={(e) => setModuleForm({...moduleForm, frequency: e.target.value as any})} className="w-full px-5 py-4 bg-stone-50 border border-stone-200 rounded-2xl text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900/10 transition-all appearance-none">
                       <option value="one-time">Uma vez</option>
+                      <option value="monthly">Mensal</option>
+                      <option value="quarterly">Trimestral</option>
+                      <option value="semiannual">Semestral</option>
                       <option value="annual">Anual</option>
                       <option value="biennial">Bienal</option>
                     </select>

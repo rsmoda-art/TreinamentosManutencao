@@ -134,10 +134,24 @@ export default function Dashboard({ onTabChange, onBulkEdit }: DashboardProps) {
           pending: 0,
           expired: 0,
         };
+        const today = new Date();
+        const next30Days = addDays(today, 30);
+        
         recData.forEach(rec => {
-          if (rec.status === 'completed') counts.completed++;
-          else if (rec.status === 'pending') counts.pending++;
-          else if (rec.status === 'expired') counts.expired++;
+          let computedStatus = rec.status;
+          const expiryDate = rec.expiryDate ? parseISO(rec.expiryDate) : null;
+
+          if (expiryDate) {
+            if (isBefore(expiryDate, today)) {
+              computedStatus = 'expired';
+            } else if (isBefore(expiryDate, next30Days)) {
+              computedStatus = 'pending';
+            }
+          }
+
+          if (computedStatus === 'completed') counts.completed++;
+          else if (computedStatus === 'pending') counts.pending++;
+          else if (computedStatus === 'expired') counts.expired++;
         });
         setStats(prev => ({
           ...prev,
