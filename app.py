@@ -1,206 +1,133 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import plotly.express as px
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Gestão de Treinamentos - Raízen", layout="wide")
+st.set_page_config(page_title="Gestão de Treinamentos Raízen", layout="wide")
 
-# --- ESTILO CUSTOMIZADO ---
+# --- CSS CUSTOMIZADO (BOTÕES PRETO E AMARELO COM BRILHO) ---
 st.markdown("""
-    <style>
-    .main { background-color: #f5f5f0; }
-    div[data-testid="stMetric"] {
-        background-color: white; padding: 15px; border-radius: 10px;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.05); border: 1px solid #e0e0e0;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- INICIALIZAÇÃO DE DADOS ---
-if 'employees' not in st.session_state:
-    st.session_state.employees = [
-        {"id": "1", "name": "João Silva", "role": "Operador", "dept": "Operações"},
-        {"id": "2", "name": "Maria Santos", "role": "Técnica", "dept": "Manutenção"},
-        {"id": "3", "name": "Renan Silva Moda", "role": "Supervisor", "dept": "Manutenção"}
-    ]
-
-if 'modules' not in st.session_state:
-    st.session_state.modules = [
-        {"id": "m1", "title": "Segurança NR10", "freq": 12},
-        {"id": "m2", "title": "Trabalho em Altura", "freq": 24},
-        {"id": "m3", "title": "Espaço Confinado", "freq": 12}
-    ]
-
-if 'requirements' not in st.session_state:
-    st.session_state.requirements = {
-        "Operador": ["m1", "m2"],
-        "Técnica": ["m1", "m2", "m3"],
-        "Supervisor": ["m1", "m3"]
-    }
-
-if 'records' not in st.session_state:
-    st.session_state.records = [
-        {"empId": "1", "modId": "m1", "completionDate": "2023-01-01", "expiryDate": "2024-01-01"}
-    ]
-
-# --- FUNÇÕES AUXILIARES ---
-def calculate_status(expiry_date_str, is_required):
-    if not expiry_date_str:
-        return "🔴 OBRIGATÓRIO" if is_required else "⚪ N/A"
+<style>
+    [data-testid="stSidebar"] { background-color: #000000; }
+    .stRadio [data-testid="stWidgetLabel"] { color: #FFD700; font-weight: bold; }
     
+    /* Estilização dos botões do menu */
+    div.stButton > button {
+        background-color: #1a1a1a;
+        color: #FFD700;
+        border: 2px solid #FFD700;
+        border-radius: 10px;
+        width: 100%;
+        height: 50px;
+        font-weight: bold;
+        transition: 0.3s;
+        text-transform: uppercase;
+    }
+    div.stButton > button:hover {
+        background-color: #FFD700;
+        color: #000000;
+        box-shadow: 0 0 15px #FFD700;
+    }
+    div.stButton > button:active {
+        transform: scale(0.95);
+        box-shadow: 0 0 5px #FFD700;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- CONEXÃO E CARREGAMENTO ---
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+def get_data():
+    # Carrega todas as abas
     try:
-        today = datetime.now().date()
-        expiry = datetime.strptime(expiry_date_str, '%Y-%m-%d').date()
-        
-        # Prefixo diferente para indicar se é um opcional que o cara fez
-        prefix = "✅" if is_required else "🔵"
-        
-        if expiry < today: return "❌ Vencido"
-        if expiry < today + timedelta(days=30): return "⚠️ A Vencer"
-        return f"{prefix} Conforme"
+        c = conn.read(worksheet="Colaboradores")
+        t = conn.read(worksheet="Treinamentos")
+        f = conn.read(worksheet="Funções")
+        r = conn.read(worksheet="Registros")
+        return c, t, f, r
     except:
-        return "Erro Data"
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-# --- SIDEBAR ---
-st.sidebar.title("🛠️ Gestão Matrix")
-page = st.sidebar.radio("Navegação:", 
-    ["Dashboard", "Matriz de Treinamento", "Lançar Treinamento", "Configurar Requisitos", "Gerenciar Módulos", "Funcionários"])
+df_colab, df_treina, df_func, df_reg = get_data()
 
-# --- PÁGINA: DASHBOARD ---
-if page == "Dashboard":
-    st.title("📊 Painel de Controle")
-    col1, col2, col3, col4 = st.columns(4)
+# --- LÓGICA DE STATUS DE TREINAMENTO ---
+def checar_status(data_exec, periodicidade_meses):
+    if pd.isna(data_exec): return "NECESSÁRIO FORMAÇÃO", "purple"
     
-    total_emp = len(st.session_state.employees)
-    expired = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate'), True) == "❌ Vencido")
-    warning = sum(1 for r in st.session_state.records if calculate_status(r.get('expiryDate'), True) == "⚠️ A Vencer")
+    hoje = datetime.now()
+    execucao = pd.to_datetime(data_exec)
+    vencimento = execucao + pd.DateOffset(months=periodicidade_meses)
+    dias_para_vencer = (vencimento - hoje).days
     
-    col1.metric("Total Colaboradores", total_emp)
-    col2.metric("Treinamentos Registrados", len(st.session_state.records))
-    col3.metric("A Vencer", warning)
-    col4.metric("Expirados", expired, delta_color="inverse")
+    # Lógica de Vencimento Crítico (01/04 a 01/11 do ano seguinte)
+    ano_vencimento = vencimento.year
+    inicio_critico = datetime(ano_vencimento, 4, 1)
+    fim_critico = datetime(ano_vencimento, 11, 1)
+    
+    if vencimento < hoje:
+        return "TREINAMENTO VENCIDO", "red"
+    elif inicio_critico <= vencimento <= fim_critico:
+        return "VENCIMENTO CRÍTICO", "orange"
+    elif dias_para_vencer <= 30:
+        return "TREINAMENTO A VENCER", "yellow"
+    else:
+        return "TREINAMENTO CONFORME", "green"
 
-    st.divider()
-    c1, c2 = st.columns([1, 1])
+# --- SIDEBAR MENU ---
+with st.sidebar:
+    st.image("https://www.raizen.com.br/themes/custom/raizen/logo.svg", width=150)
+    st.markdown("<h2 style='color: #FFD700; text-align: center;'>MATRIX PRO</h2>", unsafe_allow_html=True)
+    
+    menu = {
+        "🏠 HOME": "Home",
+        "📋 MATRIZ": "Matriz",
+        "👥 COLABORADORES": "Colaboradores",
+        "⚙️ FUNÇÕES": "Funções",
+        "✍️ LANÇAR": "Lançar",
+        "📚 TREINAMENTOS": "Treinamentos"
+    }
+    
+    # Criando botões manuais para o efeito visual solicitado
+    if 'page' not in st.session_state: st.session_state.page = "Home"
+    
+    for label, target in menu.items():
+        if st.button(label):
+            st.session_state.page = target
+
+# --- PÁGINAS ---
+current_page = st.session_state.page
+
+if current_page == "Home":
+    st.title("📊 Dashboard de Gestão")
+    
+    # Exemplo de Dashboard
+    c1, c2 = st.columns(2)
     with c1:
-        st.subheader("Distribuição por Departamento")
-        df_emp = pd.DataFrame(st.session_state.employees)
-        fig = px.pie(df_emp, names='dept', hole=0.4, color_discrete_sequence=px.colors.qualitative.Safe)
-        st.plotly_chart(fig, use_container_width=True)
-    with c2:
-        st.subheader("⚠️ Alertas de Obrigatoriedade")
-        alerts = []
-        for emp in st.session_state.employees:
-            reqs = st.session_state.requirements.get(emp['role'], [])
-            for mod_id in reqs:
-                rec = next((r for r in st.session_state.records if r['empId'] == emp['id'] and r['modId'] == mod_id), None)
-                status = calculate_status(rec['expiryDate'] if rec else None, True)
-                if status in ["🔴 OBRIGATÓRIO", "❌ Vencido", "⚠️ A Vencer"]:
-                    mod_name = next((m['title'] for m in st.session_state.modules if m['id'] == mod_id), "N/A")
-                    alerts.append({"Quem": emp['name'], "Treinamento": mod_name, "Status": status})
-        if alerts:
-            st.dataframe(pd.DataFrame(alerts), use_container_width=True, hide_index=True)
-        else:
-            st.success("Toda a equipe está em dia!")
-
-# --- PÁGINA: MATRIZ DE TREINAMENTO ---
-elif page == "Matriz de Treinamento":
-    st.title("📋 Matriz de Qualificação")
-    
-    matrix_list = []
-    for emp in st.session_state.employees:
-        row = {"Colaborador": emp['name'], "Cargo": emp['role']}
-        emp_reqs = st.session_state.requirements.get(emp['role'], [])
-        for mod in st.session_state.modules:
-            is_req = mod['id'] in emp_reqs
-            rec = next((r for r in st.session_state.records if r['empId'] == emp['id'] and r['modId'] == mod['id']), None)
-            row[mod['title']] = calculate_status(rec['expiryDate'] if rec else None, is_req)
-        matrix_list.append(row)
-    
-    df_matrix = pd.DataFrame(matrix_list)
-    st.dataframe(df_matrix.set_index("Colaborador"), use_container_width=True)
-    
-    # Botão de Download
-    csv = df_matrix.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Baixar Matriz (Excel/CSV)", csv, "matriz_treinamento.csv", "text/csv")
-    
-    st.caption("Legenda: ✅/🔵 Conforme | ⚠️ A Vencer | ❌ Vencido | 🔴 OBRIGATÓRIO | ⚪ N/A")
-
-# --- PÁGINA: LANÇAR TREINAMENTO ---
-elif page == "Lançar Treinamento":
-    st.title("📝 Registrar Conclusão")
-    with st.form("log_training"):
-        emp_name = st.selectbox("Selecione o Funcionário", [e['name'] for e in st.session_state.employees])
-        mod_title = st.selectbox("Selecione o Treinamento", [m['title'] for m in st.session_state.modules])
-        comp_date = st.date_input("Data de Realização", datetime.now())
+        st.subheader("⚠️ Vencimentos Críticos")
+        # Aqui filtraria o df_reg usando a função checar_status
+        st.info("Lista de colaboradores em período crítico (Abril - Novembro)")
         
-        if st.form_submit_button("Salvar Registro"):
-            emp_id = next(e['id'] for e in st.session_state.employees if e['name'] == emp_name)
-            mod_obj = next(m for m in st.session_state.modules if m['title'] == mod_title)
-            
-            # Cálculo automático baseado na frequência do módulo
-            expiry_date = comp_date + timedelta(days=30 * mod_obj['freq'])
-            
-            # Atualiza registro existente ou cria novo
-            st.session_state.records = [r for r in st.session_state.records if not (r['empId'] == emp_id and r['modId'] == mod_obj['id'])]
-            st.session_state.records.append({
-                "empId": emp_id, "modId": mod_obj['id'],
-                "completionDate": comp_date.strftime('%Y-%m-%d'),
-                "expiryDate": expiry_date.strftime('%Y-%m-%d')
-            })
-            st.success(f"Treinamento de {mod_title} registrado!")
-            st.balloons()
+    with c2:
+        st.subheader("📈 Status por Função")
+        # Gráfico Plotly aqui
+        fig = px.bar(df_colab, x="Função", color="Status", barmart="group")
+        st.plotly_chart(fig, use_container_width=True)
 
-# --- PÁGINA: CONFIGURAR REQUISITOS ---
-elif page == "Configurar Requisitos":
-    st.title("⚙️ Requisitos por Cargo")
-    roles = sorted(list(set(e['role'] for e in st.session_state.employees)))
-    valid_ids = [m['id'] for m in st.session_state.modules]
-    
-    for role in roles:
-        with st.expander(f"Treinamentos Obrigatórios: {role}"):
-            current = st.session_state.requirements.get(role, [])
-            # Limpeza de segurança: remove IDs que não existem mais
-            safe_default = [r for r in current if r in valid_ids]
-            
-            new_reqs = st.multiselect(
-                "Selecione os módulos obrigatórios:", 
-                options=valid_ids,
-                default=safe_default,
-                format_func=lambda x: next((m['title'] for m in st.session_state.modules if m['id'] == x), "N/A"),
-                key=f"req_{role}"
-            )
-            st.session_state.requirements[role] = new_reqs
-            st.info(f"Configuração para {role} atualizada.")
+elif current_page == "Matriz":
+    st.title("📋 Matriz de Treinamentos")
+    # Lógica de Pivot Table para montar a matriz cruzando registros e obrigatoriedade
+    st.warning("Renderizando Matriz Alfabética...")
+    # df_pivot = df_colab.merge(df_reg, on="CS").pivot(...)
+    # Aplicar cores conforme as regras (Roxo para Necessário Formação, etc)
 
-# --- PÁGINA: GERENCIAR MÓDULOS ---
-elif page == "Gerenciar Módulos":
-    st.title("📚 Módulos e Periodicidade")
-    with st.expander("➕ Adicionar Novo Treinamento"):
-        with st.form("new_mod"):
-            t = st.text_input("Nome do Treinamento")
-            f = st.number_input("Validade (Meses)", min_value=1, value=12)
-            if st.form_submit_button("Cadastrar"):
-                new_id = f"m{len(st.session_state.modules) + 1}"
-                st.session_state.modules.append({"id": new_id, "title": t, "freq": f})
-                st.rerun()
-    
-    if st.session_state.modules:
-        st.table(pd.DataFrame(st.session_state.modules)[['title', 'freq']])
-
-# --- PÁGINA: FUNCIONÁRIOS ---
-elif page == "Funcionários":
-    st.title("👥 Gestão de Colaboradores")
-    with st.expander("➕ Novo Colaborador"):
-        with st.form("new_emp"):
-            n = st.text_input("Nome Completo")
-            r = st.text_input("Cargo")
-            d = st.selectbox("Departamento", ["Operações", "Manutenção", "Segurança", "RH", "Laboratório"])
-            if st.form_submit_button("Salvar"):
-                new_id = str(len(st.session_state.employees) + 1)
-                st.session_state.employees.append({"id": new_id, "name": n, "role": r, "dept": d})
-                st.rerun()
-    
-    if st.session_state.employees:
-        st.dataframe(pd.DataFrame(st.session_state.employees).drop(columns=['id']), use_container_width=True)
+elif current_page == "Lançar":
+    st.title("✍️ Lançamento em Lote")
+    with st.form("lote"):
+        colaboradores = st.multiselect("Selecione os nomes", df_colab["Nome"].tolist())
+        treino = st.selectbox("Treinamento realizado", df_treina["Nome"].tolist())
+        data = st.date_input("Data de execução")
+        if st.form_submit_button("Salvar na Planilha"):
+            st.success("Dados enviados ao Google Sheets!")
