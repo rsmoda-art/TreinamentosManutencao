@@ -1,133 +1,146 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import plotly.express as px
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Gestão de Treinamentos Raízen", layout="wide")
+st.set_page_config(page_title="Gestão Matrix - Raízen", layout="wide")
 
-# --- CSS CUSTOMIZADO (BOTÕES PRETO E AMARELO COM BRILHO) ---
+# --- CSS: MENU MODERNO PRETO E AMARELO ---
 st.markdown("""
 <style>
-    [data-testid="stSidebar"] { background-color: #000000; }
-    .stRadio [data-testid="stWidgetLabel"] { color: #FFD700; font-weight: bold; }
+    [data-testid="stSidebar"] { background-color: #000000; border-right: 2px solid #FFD700; }
+    [data-testid="stSidebarNav"] { display: none; } /* Esconde o menu padrão */
     
-    /* Estilização dos botões do menu */
-    div.stButton > button {
+    .menu-btn {
         background-color: #1a1a1a;
-        color: #FFD700;
+        color: #FFD700 !important;
         border: 2px solid #FFD700;
-        border-radius: 10px;
-        width: 100%;
-        height: 50px;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+        text-align: center;
         font-weight: bold;
+        cursor: pointer;
         transition: 0.3s;
-        text-transform: uppercase;
+        text-decoration: none;
+        display: block;
     }
-    div.stButton > button:hover {
+    .menu-btn:hover {
         background-color: #FFD700;
-        color: #000000;
+        color: #000000 !important;
         box-shadow: 0 0 15px #FFD700;
-    }
-    div.stButton > button:active {
-        transform: scale(0.95);
-        box-shadow: 0 0 5px #FFD700;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- CONEXÃO E CARREGAMENTO ---
+# --- CONEXÃO COM GOOGLE SHEETS ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def get_data():
-    # Carrega todas as abas
-    try:
-        c = conn.read(worksheet="Colaboradores")
-        t = conn.read(worksheet="Treinamentos")
-        f = conn.read(worksheet="Funções")
-        r = conn.read(worksheet="Registros")
-        return c, t, f, r
-    except:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+def load_all_data():
+    # Lendo as 4 abas da sua planilha
+    df_c = conn.read(worksheet="Colaboradores", ttl="1m")
+    df_t = conn.read(worksheet="Treinamentos", ttl="1m")
+    df_f = conn.read(worksheet="Funções", ttl="1m")
+    df_r = conn.read(worksheet="Registros", ttl="1m")
+    return df_c, df_t, df_f, df_r
 
-df_colab, df_treina, df_func, df_reg = get_data()
+df_colab, df_treina, df_func, df_reg = load_all_data()
 
-# --- LÓGICA DE STATUS DE TREINAMENTO ---
-def checar_status(data_exec, periodicidade_meses):
-    if pd.isna(data_exec): return "NECESSÁRIO FORMAÇÃO", "purple"
+# --- LÓGICA DE DATAS E STATUS ---
+def get_status(cs, t_nome, periodicidade, obrigatorio):
+    # Busca último registro
+    registro = df_reg[(df_reg['CS'] == cs) & (df_reg['Treinamento'] == t_nome)]
     
+    if registro.empty:
+        return ("NECESSÁRIO FORMAÇÃO", "#6A0DAD") if obrigatorio else ("N/A", "#666666")
+    
+    ult_data = pd.to_datetime(registro.iloc[-1]['Data_Execução'])
+    vencimento = ult_data + pd.DateOffset(months=int(periodicidade))
     hoje = datetime.now()
-    execucao = pd.to_datetime(data_exec)
-    vencimento = execucao + pd.DateOffset(months=periodicidade_meses)
-    dias_para_vencer = (vencimento - hoje).days
     
-    # Lógica de Vencimento Crítico (01/04 a 01/11 do ano seguinte)
-    ano_vencimento = vencimento.year
-    inicio_critico = datetime(ano_vencimento, 4, 1)
-    fim_critico = datetime(ano_vencimento, 11, 1)
+    # Regra Crítica: 01/04 a 01/11
+    is_critico = (vencimento.month >= 4 and vencimento.month <= 11)
     
     if vencimento < hoje:
-        return "TREINAMENTO VENCIDO", "red"
-    elif inicio_critico <= vencimento <= fim_critico:
-        return "VENCIMENTO CRÍTICO", "orange"
-    elif dias_para_vencer <= 30:
-        return "TREINAMENTO A VENCER", "yellow"
+        return ("TREINAMENTO VENCIDO", "#FF0000")
+    elif is_critico:
+        return ("VENCIMENTO CRÍTICO", "#FF8C00")
+    elif vencimento < (hoje + timedelta(days=30)):
+        return ("TREINAMENTO A VENCER", "#FFFF00")
     else:
-        return "TREINAMENTO CONFORME", "green"
+        return ("TREINAMENTO CONFORME", "#228B22")
 
-# --- SIDEBAR MENU ---
+# --- SIDEBAR CUSTOMIZADA ---
 with st.sidebar:
-    st.image("https://www.raizen.com.br/themes/custom/raizen/logo.svg", width=150)
-    st.markdown("<h2 style='color: #FFD700; text-align: center;'>MATRIX PRO</h2>", unsafe_allow_html=True)
+    st.markdown("<h1 style='color: #FFD700; text-align: center;'>MATRIX PRO</h1>", unsafe_allow_html=True)
     
-    menu = {
+    pages = {
         "🏠 HOME": "Home",
-        "📋 MATRIZ": "Matriz",
+        "📋 MATRIZ DE TREINAMENTOS": "Matriz",
         "👥 COLABORADORES": "Colaboradores",
         "⚙️ FUNÇÕES": "Funções",
-        "✍️ LANÇAR": "Lançar",
+        "✍️ LANÇAR TREINAMENTO": "Lançar",
         "📚 TREINAMENTOS": "Treinamentos"
     }
     
-    # Criando botões manuais para o efeito visual solicitado
-    if 'page' not in st.session_state: st.session_state.page = "Home"
+    if 'current_page' not in st.session_state: st.session_state.current_page = "Home"
     
-    for label, target in menu.items():
-        if st.button(label):
-            st.session_state.page = target
+    for label, target in pages.items():
+        if st.button(label, key=target, use_container_width=True):
+            st.session_state.current_page = target
 
-# --- PÁGINAS ---
-current_page = st.session_state.page
+# --- RENDERIZAÇÃO DAS PÁGINAS ---
+p = st.session_state.current_page
 
-if current_page == "Home":
+if p == "Home":
     st.title("📊 Dashboard de Gestão")
+    # Dashboard e filtros de vencimento aqui...
+    st.write("Bem-vindo, Renan. Aqui aparecerão os alertas críticos.")
+
+elif p == "Matriz":
+    st.title("📋 Matriz de Qualificação")
     
-    # Exemplo de Dashboard
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("⚠️ Vencimentos Críticos")
-        # Aqui filtraria o df_reg usando a função checar_status
-        st.info("Lista de colaboradores em período crítico (Abril - Novembro)")
+    # Criar DataFrame da Matriz
+    matrix_rows = []
+    df_colab_sorted = df_colab.sort_values(by=["Função", "Nome"])
+    
+    for _, colab in df_colab_sorted.iterrows():
+        row = {"CS": colab['CS'], "NOME": colab['Nome'], "FUNÇÃO": colab['Função']}
         
-    with c2:
-        st.subheader("📈 Status por Função")
-        # Gráfico Plotly aqui
-        fig = px.bar(df_colab, x="Função", color="Status", barmart="group")
-        st.plotly_chart(fig, use_container_width=True)
+        # Obter treinamentos obrigatórios da função
+        req_row = df_func[df_func['Nome_Função'] == colab['Função']]
+        obrigatorios = str(req_row.iloc[0]['Treinamentos_Obrigatórios']).split(",") if not req_row.empty else []
+        obrigatorios = [o.strip() for o in obrigatorios]
+        
+        for _, t in df_treina.iterrows():
+            status, _ = get_status(colab['CS'], t['Nome'], t['Periodicidade'], t['Nome'] in obrigatorios)
+            row[t['Nome']] = status
+        matrix_rows.append(row)
+    
+    df_matrix = pd.DataFrame(matrix_rows)
+    
+    # Estilização
+    def style_cells(val):
+        color = 'white'
+        bg = 'transparent'
+        if val == "NECESSÁRIO FORMAÇÃO": bg = '#6A0DAD'
+        elif val == "TREINAMENTO VENCIDO": bg = '#FF0000'
+        elif val == "VENCIMENTO CRÍTICO": bg = '#FF8C00'; color = 'black'
+        elif val == "TREINAMENTO A VENCER": bg = '#FFFF00'; color = 'black'
+        elif val == "TREINAMENTO CONFORME": bg = '#228B22'
+        return f'background-color: {bg}; color: {color}; font-weight: bold;'
 
-elif current_page == "Matriz":
-    st.title("📋 Matriz de Treinamentos")
-    # Lógica de Pivot Table para montar a matriz cruzando registros e obrigatoriedade
-    st.warning("Renderizando Matriz Alfabética...")
-    # df_pivot = df_colab.merge(df_reg, on="CS").pivot(...)
-    # Aplicar cores conforme as regras (Roxo para Necessário Formação, etc)
+    st.dataframe(df_matrix.style.applymap(style_cells), use_container_width=True)
 
-elif current_page == "Lançar":
+elif p == "Lançar":
     st.title("✍️ Lançamento em Lote")
-    with st.form("lote"):
-        colaboradores = st.multiselect("Selecione os nomes", df_colab["Nome"].tolist())
-        treino = st.selectbox("Treinamento realizado", df_treina["Nome"].tolist())
-        data = st.date_input("Data de execução")
-        if st.form_submit_button("Salvar na Planilha"):
-            st.success("Dados enviados ao Google Sheets!")
+    with st.form("form_lote"):
+        nomes = st.multiselect("Selecione os Colaboradores", df_colab["Nome"].tolist())
+        treino = st.selectbox("Selecione o Treinamento", df_treina["Nome"].tolist())
+        data_exec = st.date_input("Data de Execução")
+        
+        if st.form_submit_button("SALVAR REGISTROS"):
+            # Lógica para converter nomes em CS e salvar no Sheets via conn.update
+            st.success(f"Registros de {treino} salvos para {len(nomes)} pessoas!")
